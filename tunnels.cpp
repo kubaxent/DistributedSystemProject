@@ -1,17 +1,20 @@
-//Compile with mpicc, run with mpirun -np <thread num.> ./a.out
+//Compile with mpic++, run with mpirun -np <thread num.> ./a.out
 
 #include <mpi.h>
 #include <stdio.h>
 #include <pthread.h>
 #include <queue>
-#include <vector> 
+#include <vector>
+#include <string>
+#include <unistd.h>
+#include <algorithm> 
 
 //Message tags
 #define REQ_TAG 10
 #define REP_TAG 20
 #define REL_TAG 30
 #define TREQ_TAG 40
-#define TREL_TAG 50
+#define TREP_TAG 50
 #define TTAKE_TAG 60
 #define TACK_TAG 70
 
@@ -30,9 +33,35 @@ int cur_dir = 1; //Current direction (1 - to paradise, 2 - to real world)
 queue<int> lamport_queue; //Lamport queue
 int dir[T]; //Array with current directions of all tunnels, 0 - free, 1 - to paradise, 2 - to real world
 vector<int> tuns[T]; //Array of vectors of tunnels waiting for/being in tunnels 
-bool resp; //Flag telling if another process is requesting  the current tunnel but from the opposite side
 
+//Bools, mutexes and conditions for every time we need to wait for a response from all/several other processes
+//Used to avoid active waiting
+bool received_all_tun_rep;
+pthread_mutex_t cond_lock_tun_rep = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t cond_tun_rep = PTHREAD_COND_INITIALIZER;
+
+bool received_all_tun_ack;
+pthread_mutex_t cond_lock_tun_ack = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t cond_tun_ack = PTHREAD_COND_INITIALIZER;
+
+bool received_all_lamp;
+pthread_mutex_t cond_lock_lamp = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t cond_lamp = PTHREAD_COND_INITIALIZER;
+
+
+pthread_t comm_thread; //The communication thread handle
 int n; //Rich people amount (if set to 0, communism.cpp takes over)
+
+bool all_resp_good = true; //If this remains true after all ack's we can get into the chosen tunnel queue
+
+//Struct with all necessary data
+struct packet_t {
+    int tsi;       
+    int tid;
+	int tun_id;      
+    int dir;
+	bool resp;     
+};
 
 //Lamport clock function that increases the timer after a call,
 //or compares the timer to a value from receiving a timestamped message
@@ -45,7 +74,79 @@ void lamport_clock(int sender_time = -1){
 	}
 }
 
-int choose_tunnel(){
+void send(packet_t *pkt, int destination, int tag){
+	if(destination!=tid){
+		MPI_Send(pkt, sizeof(packet_t), MPI_BYTE, destination, tag, MPI_COMM_WORLD);
+		lamport_clock();
+	}
+}
+
+bool tuns_contains(int tun, int item){
+	if(find(tuns[tun].begin(), tuns[tun].end(), item) != tuns[tun].end()) {
+    	return true;
+	} else {
+		return false;
+	}
+}
+
+
+
+bool choose_tunnel(){
+
+	//1.1 Get all other processes info about tunnels
+	packet_t msg;
+	msg.tid=tid;
+	msg.tsi=tsi;
+	
+	for(int i = 0; i < n; i++){
+		send(&msg,i,TREQ_TAG);
+	}
+
+	pthread_mutex_lock(&cond_lock_tun_rep);
+	while (!received_all_tun_rep)
+	{
+		pthread_cond_wait(&cond_tun_rep,&cond_lock_tun_rep);
+	}
+	pthread_mutex_unlock(&cond_lock_tun_rep);
+
+	printf("I'm %d and I have tun_rep from everyone\n",tid);
+
+	//1.3 Finding the tunnel with the shortest queue
+	int shortest_queue_length = 999;
+	int best_tunnel = -1;
+	for(int i = 0; i < T; i++){
+		if(tuns[i].size()==0){
+			best_tunnel = i;
+			break;
+		}
+		if(tuns[i].size()<shortest_queue_length && dir[i]==cur_dir){
+			shortest_queue_length = tuns[i].size();
+			best_tunnel = i;
+		}
+	}
+
+	tun_id = best_tunnel;
+
+	//1.4 - Sending TUN_TAKE to everyone else
+	msg.tsi = tsi;
+	msg.tun_id = tun_id;
+	msg.dir = cur_dir;
+	for(int i = 0; i < n; i++){
+		send(&msg,i,TTAKE_TAG);
+	}
+
+	//1.6 - If nobody is contesting from the other side we're good to go
+	pthread_mutex_lock(&cond_lock_tun_ack);
+	while (!received_all_tun_rep){
+		pthread_cond_wait(&cond_tun_ack,&cond_lock_tun_ack);
+	}
+	pthread_mutex_unlock(&cond_lock_tun_ack);
+
+	if(!all_resp_good){
+		return false;
+	}else{
+		return true;
+	}
 
 	lamport_clock();
 	return 0;
@@ -53,8 +154,11 @@ int choose_tunnel(){
 
 void go_through(){
 
-
+	string dir = (cur_dir==1)?"to paradise":"to the real world";
+	printf("I'm %d going through tunnel %d %s.\n",tid,tun_id,&(dir[0]));
 	lamport_clock();
+
+	sleep(5); //simulating time taking to go through tunnel 
 }
 
 void cleanup(){
@@ -63,21 +167,90 @@ void cleanup(){
 	lamport_clock();
 }
 
-void send(){
-
-	
-	lamport_clock();
-}
-
-
 void *recv_thread(void *ptr){
+	printf("Communication thread of %d started\n",tid);
+	MPI_Status status;
+	int trep_counter = 0;
+	
+	int tack_counter = 0;
+	
+	packet_t msg;
+	packet_t resp;
+	resp.tid = tid;
 
+	while(true){
+		
+		MPI_Recv( &msg, sizeof(packet_t), MPI_BYTE, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+		lamport_clock(msg.tsi);
+
+		switch (status.MPI_TAG){
+		case TREQ_TAG:
+			resp.tsi = tsi;
+			resp.tun_id = tun_id;
+			resp.dir = cur_dir;
+			send(&resp,msg.tid,TREP_TAG);
+		break;
+		case TREP_TAG:
+			if(msg.tun_id!=-1&&!tuns_contains(msg.tun_id,msg.tid))tuns[msg.tun_id].push_back(msg.tid);
+			dir[msg.tid] = msg.dir;
+
+			trep_counter++;
+			pthread_mutex_lock(&cond_lock_tun_rep);
+			if(trep_counter==n-1){
+				trep_counter = 0;
+				received_all_tun_rep = true;
+				pthread_cond_signal(&cond_tun_rep);
+			}
+			pthread_mutex_unlock(&cond_lock_tun_rep);
+		break;
+		case TTAKE_TAG:
+			if(msg.tun_id!=-1&&!tuns_contains(msg.tun_id,msg.tid))tuns[msg.tun_id].push_back(msg.tid);
+			if(msg.tun_id==tun_id){
+				if(msg.dir==cur_dir){
+					resp.resp=true;
+				}else{
+					resp.resp=false;
+				}
+			}
+			resp.tsi = tsi;
+			resp.tun_id = tun_id;
+			resp.dir = cur_dir;
+			send(&resp,msg.tid,TACK_TAG);
+		break;
+		case TACK_TAG:
+			tack_counter++;
+			if(msg.resp==false)all_resp_good = false;
+			pthread_mutex_lock(&cond_lock_tun_ack);
+			if(tack_counter==n-1){
+				tack_counter = 0;
+				received_all_tun_ack = true;
+				pthread_cond_signal(&cond_tun_ack);
+			}
+			pthread_mutex_unlock(&cond_lock_tun_ack);
+		break;
+
+		default:
+			break;
+		}
+		//printf("I'm %d, got message from %d with timestamp %d\n",tid,msg.tid,msg.tsi);
+	}
 	
 	lamport_clock();
 }
 
 void main_loop(){
-	
+	while(true){
+		
+		bool res;
+		while (res==false)
+		{
+			res = choose_tunnel();
+		}
+		go_through();
+
+		cur_dir = (cur_dir==1)?2:1;
+		sleep(5); //Simulating being on the "other side"
+	}
 }
 
 //Check of MPI thread support, shamelessly copied from the Magazines example
@@ -107,32 +280,18 @@ void check_thread_support(int provided)
 int main(int argc, char **argv)
 {
 	int provided;
-    MPI_Init_thread(&argc, &argv,MPI_THREAD_MULTIPLE, &provided); //NOTE: MPI_Init_thread and MPI_Init don't play well together
+    MPI_Init_thread(&argc, &argv,MPI_THREAD_MULTIPLE, &provided);
     check_thread_support(provided);
 
-	/*MPI_Status status;
-	MPI_Init(&argc, &argv); //Musi być w każdym programie na początku
+	MPI_Status status;
 
 	printf("Checking!\n");
 	MPI_Comm_size( MPI_COMM_WORLD, &n ); //how many processes
 	MPI_Comm_rank( MPI_COMM_WORLD, &tid ); //my id
-	printf("My id is %d from %d\n",tid, n);*/
+	printf("My id is %d from %d\n",tid, n);
 
+	pthread_create( &comm_thread, NULL, recv_thread , 0);
+	main_loop();
 
-
-	/*int msg[2];
-	if ( tid == ROOT)
-	{
-		MPI_Recv(msg, 2, MPI_INT, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
-		printf(" Otrzymalem %d %d od %d\n", msg[0], msg[1], status.MPI_SOURCE);
-	}
-	else
-	{
-		msg[0] = tid;
-		msg[1] = size;
-		MPI_Send( msg, 2, MPI_INT, ROOT, MSG_TAG, MPI_COMM_WORLD );
-		printf(" Wyslalem %d %d do %d\n", msg[0], msg[1], ROOT );
-	}*/
-
-	MPI_Finalize(); // Musi być w każdym programie na końcu
+	MPI_Finalize();
 }
