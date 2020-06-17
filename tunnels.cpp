@@ -30,23 +30,31 @@ int tid; //Process id
 int tun_id = -1; //ID of requested/posessed tunnel, if there is none set to -1
 int tsi = 0; //Lamport clock value
 int cur_dir = 1; //Current direction (1 - to paradise, 2 - to real world)
-queue<int> lamport_queue; //Lamport queue
+vector<int> lamport_queue; //Lamport queue
 int dir[T]; //Array with current directions of all tunnels, 0 - free, 1 - to paradise, 2 - to real world
 vector<int> tuns[T]; //Array of vectors of tunnels waiting for/being in tunnels 
 
 //Bools, mutexes and conditions for every time we need to wait for a response from all/several other processes
 //Used to avoid active waiting
-bool received_all_tun_rep;
+bool received_all_tun_rep = false;
 pthread_mutex_t cond_lock_tun_rep = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t cond_tun_rep = PTHREAD_COND_INITIALIZER;
 
-bool received_all_tun_ack;
+bool received_all_tun_ack = false;
 pthread_mutex_t cond_lock_tun_ack = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t cond_tun_ack = PTHREAD_COND_INITIALIZER;
 
-bool received_all_lamp;
+bool received_all_lamp = false;
 pthread_mutex_t cond_lock_lamp = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t cond_lamp = PTHREAD_COND_INITIALIZER;
+
+bool enough_space = false;
+pthread_mutex_t cond_lock_space = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t cond_space = PTHREAD_COND_INITIALIZER;
+
+bool at_top = false;
+pthread_mutex_t cond_lock_top = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t cond_top = PTHREAD_COND_INITIALIZER;
 
 
 pthread_t comm_thread; //The communication thread handle
@@ -89,8 +97,6 @@ bool tuns_contains(int tun, int item){
 	}
 }
 
-
-
 bool choose_tunnel(){
 
 	//1.1 Get all other processes info about tunnels
@@ -109,7 +115,7 @@ bool choose_tunnel(){
 	}
 	pthread_mutex_unlock(&cond_lock_tun_rep);
 
-	printf("I'm %d and I have tun_rep from everyone\n",tid);
+	printf("%d, %d got tun_rep from everyone\n",tsi,tid);
 
 	//1.3 Finding the tunnel with the shortest queue
 	int shortest_queue_length = 999;
@@ -126,6 +132,7 @@ bool choose_tunnel(){
 	}
 
 	tun_id = best_tunnel;
+	printf("%d, %d chose best tunnel - %d\n",tsi,tid,tun_id);
 
 	//1.4 - Sending TUN_TAKE to everyone else
 	msg.tsi = tsi;
@@ -142,9 +149,20 @@ bool choose_tunnel(){
 	}
 	pthread_mutex_unlock(&cond_lock_tun_ack);
 
-	if(!all_resp_good){
+	if(all_resp_good==false){
+		msg.tsi = tsi;
+		msg.tun_id = tun_id;
+		//We're not queing for this one after all so we're removing ourselves
+		//from the other processes tuns
+		for(int i = 0; i < n; i++){
+			send(&msg,i,REL_TAG);
+		}
+		//After we sent it, we reset our local chosen tunnel and return false
+		printf("%d, %d's tunnel - %d - was contested, going back to finding \n",tsi,tid,tun_id);
+		tun_id = -1;
 		return false;
 	}else{
+		printf("%d, %d secured tunnel - %d\n",tsi,tid,tun_id);
 		return true;
 	}
 
@@ -152,19 +170,65 @@ bool choose_tunnel(){
 	return 0;
 }
 
+int num_above(){
+	for(int i = 0; i < lamport_queue.size(); i++){
+		if(lamport_queue[i]==tid){
+			return i;
+		}
+	}
+	return -1;
+}
+
 void go_through(){
 
-	string dir = (cur_dir==1)?"to paradise":"to the real world";
-	printf("I'm %d going through tunnel %d %s.\n",tid,tun_id,&(dir[0]));
+	lamport_queue.push_back(tid);
+	printf("%d, %d added itself to it's lamport queue\n",tsi,tid);
+
+	packet_t msg;
+	msg.tid = tid;
+	msg.tsi = tsi;
+	for(int i = 0; i < tuns[tun_id].size(); i++){
+		//printf("%d sent REQ to %d for tunnel %d\n",tid,tuns[tun_id][i],tun_id);
+		send(&msg,tuns[tun_id][i],REQ_TAG);
+	}
+	printf("%d, %d sent REQ to everyone in queue for %d\n",tsi,tid,tun_id);
+
+	pthread_mutex_lock(&cond_lock_lamp);
+	while (!received_all_lamp){
+		pthread_cond_wait(&cond_lamp,&cond_lock_lamp);
+	}
+	pthread_mutex_unlock(&cond_lock_lamp);
+
+	printf("%d, %d got REP from everyone waiting for tunnel %d\n",tsi,tid,tun_id);
+
+	//if the tunnel has enough space we go thorugh, otherwise we wait for REL
+	if(((num_above() * X) <= (P - X))==false){
+		pthread_mutex_lock(&cond_lock_space);
+		while (!enough_space){
+			pthread_cond_wait(&cond_space,&cond_lock_space);
+		}
+		pthread_mutex_unlock(&cond_lock_space);
+	}	
+	printf("%d, %d now has enough space to enter tunnel %d\n",tsi,tid,tun_id);
+
+	string dir = (cur_dir==1)?"paradise":"the real world";
+	printf("%d, %d entered tunnel %d to %s.\n",tsi, tid,tun_id,&(dir[0]));
 	lamport_clock();
 
 	sleep(5); //simulating time taking to go through tunnel 
-}
 
-void cleanup(){
+	pthread_mutex_lock(&cond_lock_top);
+	while (!at_top){
+		pthread_cond_wait(&cond_top,&cond_lock_top);
+	}
+	pthread_mutex_unlock(&cond_lock_top);
 
+	for(int i = 0; i < tuns[tun_id].size();i++){
+		msg.tsi = tsi;
+		send(&msg,tuns[tun_id][i],REL_TAG);
+	}
 
-	lamport_clock();
+	printf("%d, %d left tunnel %d and entered %s\n",tsi,tid,tun_id,&(dir[0]));
 }
 
 void *recv_thread(void *ptr){
@@ -173,6 +237,8 @@ void *recv_thread(void *ptr){
 	int trep_counter = 0;
 	
 	int tack_counter = 0;
+
+	int rep_counter = 0;
 	
 	packet_t msg;
 	packet_t resp;
@@ -193,7 +259,6 @@ void *recv_thread(void *ptr){
 		case TREP_TAG:
 			if(msg.tun_id!=-1&&!tuns_contains(msg.tun_id,msg.tid))tuns[msg.tun_id].push_back(msg.tid);
 			dir[msg.tid] = msg.dir;
-
 			trep_counter++;
 			pthread_mutex_lock(&cond_lock_tun_rep);
 			if(trep_counter==n-1){
@@ -228,6 +293,38 @@ void *recv_thread(void *ptr){
 			}
 			pthread_mutex_unlock(&cond_lock_tun_ack);
 		break;
+		case REQ_TAG:
+			lamport_queue.push_back(msg.tid);
+			resp.tsi = tsi;
+			send(&resp,msg.tid,REP_TAG);
+		break;
+		case REP_TAG:
+			rep_counter++;
+			pthread_mutex_lock(&cond_lock_lamp);
+			//printf("%d - %d/%d\n",tid,rep_counter,(int)(tuns[tun_id].size()-1));
+			if(rep_counter==tuns[tun_id].size()-1){
+				rep_counter = 0;
+				received_all_lamp = true;
+				pthread_cond_signal(&cond_lamp);
+			}
+			pthread_mutex_unlock(&cond_lock_lamp);
+		break;
+		case REL_TAG:
+			tuns[msg.tun_id].erase(remove(tuns[msg.tun_id].begin(), tuns[msg.tun_id].end(), msg.tid), tuns[msg.tun_id].end());
+			lamport_queue.erase(remove(lamport_queue.begin(), lamport_queue.end(), msg.tid), lamport_queue.end());
+			pthread_mutex_lock(&cond_lock_top);
+			if(num_above()==0){
+				at_top = true;
+				pthread_cond_signal(&cond_top);
+			}
+			pthread_mutex_unlock(&cond_lock_space);
+			pthread_mutex_lock(&cond_lock_top);
+			if((num_above() * X) <= (P - X)){
+				enough_space = true;
+				pthread_cond_signal(&cond_space);
+			}
+			pthread_mutex_unlock(&cond_lock_space);
+		break;
 
 		default:
 			break;
@@ -248,7 +345,16 @@ void main_loop(){
 		}
 		go_through();
 
+		//Cleanup
 		cur_dir = (cur_dir==1)?2:1;
+		tun_id = -1;
+		enough_space = false;
+		at_top = false;
+		received_all_lamp = false;
+		received_all_tun_ack = false;
+		received_all_tun_rep = false;
+		all_resp_good = true;
+
 		sleep(5); //Simulating being on the "other side"
 	}
 }
