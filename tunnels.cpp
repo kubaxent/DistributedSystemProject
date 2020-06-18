@@ -20,8 +20,8 @@
 
 //Task costants
 #define X 10 //Squad size
-#define P 50 //Tunnel size
-#define T 5 //Tunnels amount
+#define P 30 //Tunnel size
+#define T 3 //Tunnels amount
 
 using namespace std;
 
@@ -56,7 +56,6 @@ bool at_top = false;
 pthread_mutex_t cond_lock_top = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t cond_top = PTHREAD_COND_INITIALIZER;
 
-
 pthread_t comm_thread; //The communication thread handle
 int n; //Rich people amount (if set to 0, communism.cpp takes over)
 
@@ -83,6 +82,13 @@ void lamport_clock(int sender_time = -1){
 }
 
 void send(packet_t *pkt, int destination, int tag){
+	if(destination!=tid){
+		MPI_Send(pkt, sizeof(packet_t), MPI_BYTE, destination, tag, MPI_COMM_WORLD);
+		lamport_clock();
+	}
+}
+
+void send_resp(packet_t *pkt, int destination, int tag){
 	if(destination!=tid){
 		MPI_Send(pkt, sizeof(packet_t), MPI_BYTE, destination, tag, MPI_COMM_WORLD);
 		lamport_clock();
@@ -177,6 +183,7 @@ int num_above(){
 		}
 	}
 	return -1;
+	
 }
 
 void go_through(){
@@ -193,16 +200,20 @@ void go_through(){
 	}
 	printf("%d, %d sent REQ to everyone in queue for %d\n",tsi,tid,tun_id);
 
-	pthread_mutex_lock(&cond_lock_lamp);
-	while (!received_all_lamp){
-		pthread_cond_wait(&cond_lamp,&cond_lock_lamp);
+	if(!(tuns[tun_id].size()==0)){
+		pthread_mutex_lock(&cond_lock_lamp);
+		while (!received_all_lamp){
+			pthread_cond_wait(&cond_lamp,&cond_lock_lamp);
+		}
+		pthread_mutex_unlock(&cond_lock_lamp);
+		printf("%d, %d got REP from everyone waiting for tunnel %d\n",tsi,tid,tun_id);
+	}else{
+		printf("%d, %d didn't need REP for %d\n",tsi,tid,tun_id);
 	}
-	pthread_mutex_unlock(&cond_lock_lamp);
-
-	printf("%d, %d got REP from everyone waiting for tunnel %d\n",tsi,tid,tun_id);
 
 	//if the tunnel has enough space we go thorugh, otherwise we wait for REL
-	if(((num_above() * X) <= (P - X))==false){
+	int num = num_above();
+	if(((num * X) <= (P - X))==false){
 		pthread_mutex_lock(&cond_lock_space);
 		while (!enough_space){
 			pthread_cond_wait(&cond_space,&cond_lock_space);
@@ -217,11 +228,15 @@ void go_through(){
 
 	sleep(5); //simulating time taking to go through tunnel 
 
-	pthread_mutex_lock(&cond_lock_top);
-	while (!at_top){
-		pthread_cond_wait(&cond_top,&cond_lock_top);
+	//Waiting for being at the top to leave the tunnel
+	num = num_above();
+	if(!(num==0)){
+		pthread_mutex_lock(&cond_lock_top);
+		while (!at_top){
+			pthread_cond_wait(&cond_top,&cond_lock_top);
+		}
+		pthread_mutex_unlock(&cond_lock_top);
 	}
-	pthread_mutex_unlock(&cond_lock_top);
 
 	for(int i = 0; i < tuns[tun_id].size();i++){
 		msg.tsi = tsi;
@@ -254,7 +269,7 @@ void *recv_thread(void *ptr){
 			resp.tsi = tsi;
 			resp.tun_id = tun_id;
 			resp.dir = cur_dir;
-			send(&resp,msg.tid,TREP_TAG);
+			send_resp(&resp,msg.tid,TREP_TAG);
 		break;
 		case TREP_TAG:
 			if(msg.tun_id!=-1&&!tuns_contains(msg.tun_id,msg.tid))tuns[msg.tun_id].push_back(msg.tid);
@@ -269,7 +284,10 @@ void *recv_thread(void *ptr){
 			pthread_mutex_unlock(&cond_lock_tun_rep);
 		break;
 		case TTAKE_TAG:
-			if(msg.tun_id!=-1&&!tuns_contains(msg.tun_id,msg.tid))tuns[msg.tun_id].push_back(msg.tid);
+			if(msg.tun_id!=-1&&!tuns_contains(msg.tun_id,msg.tid)){
+				tuns[msg.tun_id].push_back(msg.tid);
+				//printf("%d - pushed %d to %d in tuns\n",tid,msg.tid,msg.tun_id);
+			}
 			if(msg.tun_id==tun_id){
 				if(msg.dir==cur_dir){
 					resp.resp=true;
@@ -280,7 +298,7 @@ void *recv_thread(void *ptr){
 			resp.tsi = tsi;
 			resp.tun_id = tun_id;
 			resp.dir = cur_dir;
-			send(&resp,msg.tid,TACK_TAG);
+			send_resp(&resp,msg.tid,TACK_TAG);
 		break;
 		case TACK_TAG:
 			tack_counter++;
@@ -296,7 +314,8 @@ void *recv_thread(void *ptr){
 		case REQ_TAG:
 			lamport_queue.push_back(msg.tid);
 			resp.tsi = tsi;
-			send(&resp,msg.tid,REP_TAG);
+			//printf("%d got REQ from %d, sending back REP",tid,msg.tid);
+			send_resp(&resp,msg.tid,REP_TAG);
 		break;
 		case REP_TAG:
 			rep_counter++;
@@ -312,6 +331,7 @@ void *recv_thread(void *ptr){
 		case REL_TAG:
 			tuns[msg.tun_id].erase(remove(tuns[msg.tun_id].begin(), tuns[msg.tun_id].end(), msg.tid), tuns[msg.tun_id].end());
 			lamport_queue.erase(remove(lamport_queue.begin(), lamport_queue.end(), msg.tid), lamport_queue.end());
+
 			pthread_mutex_lock(&cond_lock_top);
 			if(num_above()==0){
 				at_top = true;
