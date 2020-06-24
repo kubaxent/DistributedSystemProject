@@ -1,0 +1,29 @@
+==8401== Memcheck, a memory error detector
+==8401== Copyright (C) 2002-2017, and GNU GPL'd, by Julian Seward et al.
+==8401== Using Valgrind-3.13.0 and LibVEX; rerun with -h for copyright info
+==8401== Command: ./a.out
+==8401== Parent PID: 8347
+==8401== 
+==8355== Conditional jump or move depends on uninitialised value(s)
+==8355==    at 0x61AE375: opal_value_unload (in /usr/lib/x86_64-linux-gnu/openmpi/lib/libopen-pal.so.20.10.1)
+==8355==    by 0x509997A: ompi_proc_complete_init (in /usr/lib/x86_64-linux-gnu/openmpi/lib/libmpi.so.20.10.1)
+==8355==    by 0x509D8A4: ompi_mpi_init (in /usr/lib/x86_64-linux-gnu/openmpi/lib/libmpi.so.20.10.1)
+==8355==    by 0x50BE404: PMPI_Init_thread (in /usr/lib/x86_64-linux-gnu/openmpi/lib/libmpi.so.20.10.1)
+==8355==    by 0x115096: main (tunnels.cpp:458)
+==8355== 
+==8354== 
+==8354== Process terminating with default action of signal 15 (SIGTERM)
+==8390==    at 0x5C0BE57: sched_yield (syscall-template.S:78)
+==8390==    by 0x61ACC74: sync_wait_mt (in /usr/lib/x86_64-linux-gnu/openmpi/lib/libopen-pal.so.20.10.1)
+==8390==    by 0x1058A684: mca_pml_ob1_send (in /usr/lib/x86_64-linux-gnu/openmpi/lib/openmpi/mca_pml_ob1.so)
+==8390==    by 0x50CB712: PMPI_Send (in /usr/lib/x86_64-linux-gnu/openmpi/lib/libmpi.so.20.10.1)
+==8354==    by 0x==8==8392== 
+==8392== HEAP SUMMARY:
+==8392==     in use at exit: 3,336,311 bytes in 10,770 blocks
+==8392==   total heap usage: 25,266 allocs, 14,496 frees, 5,163,642 bytes allocated
+==8392== 
+355==   total heap us==8390===8354== 
+==8354== HEAP SUMMARY:
+==8354==     in use at exit: 3,854,057 bytes in 10,779 blocks
+==8354==   total heap usage: 25,276 allocs, 14,497 frees, 5,681,406 bytes allocated
+==8354== 

@@ -56,6 +56,8 @@ bool at_top = false;
 pthread_mutex_t cond_lock_top = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t cond_top = PTHREAD_COND_INITIALIZER;
 
+//pthread_mutex_t lamport_lock = PTHREAD_MUTEX_INITIALIZER;
+
 pthread_t comm_thread; //The communication thread handle
 int n; //Rich people amount (if set to 0, communism.cpp takes over)
 
@@ -187,18 +189,23 @@ bool choose_tunnel(){
 }
 
 int num_above(){
+	//pthread_mutex_lock(&lamport_lock);
 	for(int i = 0; i < lamport_queue.size(); i++){
 		if(lamport_queue[i]==tid){
+			//pthread_mutex_unlock(&lamport_lock);
 			return i;
 		}
 	}
+	//pthread_mutex_unlock(&lamport_lock);
 	return -1;
 	
 }
 
 void go_through(){
-
+	//pthread_mutex_lock(&lamport_lock);
 	lamport_queue.push_back(tid);
+	//pthread_mutex_unlock(&lamport_lock);
+
 	printf("%d, %d added itself to it's lamport queue\n",tsi,tid);
 
 	packet_t msg;
@@ -207,8 +214,11 @@ void go_through(){
 
 	int size = tuns[tun_id].size();
 
+	//TODO: size changes before we receive all reponses so we're waiting for
+	//more responses than we should actually get, if we're waiting for 
+	//REP from people every time we add someone to TUNS we need to also send them a REQ
 	for(int i = 0; i < size; i++){
-		//printf("%d sent REQ to %d for tunnel %d\n",tid,tuns[tun_id][i],tun_id);
+		printf("%d, %d sent REQ to %d for tunnel %d\n",tsi,tid,tuns[tun_id][i],tun_id);
 		send(&msg,tuns[tun_id][i],REQ_TAG);
 	}
 	printf("%d, %d sent REQ to everyone in queue for %d\n",tsi,tid,tun_id);
@@ -253,7 +263,10 @@ void go_through(){
 		pthread_mutex_unlock(&cond_lock_top);
 	}
 
+	//pthread_mutex_lock(&lamport_lock);
 	lamport_queue.erase(remove(lamport_queue.begin(), lamport_queue.end(), tid), lamport_queue.end());
+	//pthread_mutex_unlock(&lamport_lock);
+
 	for(int i = 0; i < tuns[tun_id].size();i++){
 		msg.tsi = tsi;
 		msg.tun_id = tun_id;
@@ -264,9 +277,6 @@ void go_through(){
 	//printf("%d, tunnel %d is now at %d/%d capacity\n",tsi,tun_id,(int)(tuns[tun_id].size())*X,P);
 }
 
-void thread_safe_push_back(){
-
-}
 
 void *recv_thread(void *ptr){
 	printf("Communication thread of %d started\n",tid);
@@ -299,7 +309,7 @@ void *recv_thread(void *ptr){
 			trep_counter++;
 			printf("%d, %d received %d/%d TREP\n",tsi,tid,trep_counter,n-1);
 			if(msg.tun_id!=-1&&!tuns_contains(msg.tun_id,msg.tid))tuns[msg.tun_id].push_back(msg.tid);
-			dir[msg.tid] = msg.dir;
+			dir[msg.tun_id] = msg.dir;
 			pthread_mutex_lock(&cond_lock_tun_rep);
 			if(trep_counter==n-1){
 				trep_counter = 0;
@@ -341,7 +351,9 @@ void *recv_thread(void *ptr){
 		break;
 		case REQ_TAG:
 			//printf("%d, %d received REQ from %d\n",tsi, tid, msg.tid);
+			//pthread_mutex_lock(&lamport_lock);
 			lamport_queue.push_back(msg.tid);
+			//pthread_mutex_unlock(&lamport_lock);
 			resp.tsi = tsi;
 			send(&resp,msg.tid,REP_TAG);
 		break;
@@ -361,7 +373,10 @@ void *recv_thread(void *ptr){
 			//printf("%d, %d received REL from %d\n",tsi, tid, msg.tid);
 			
 			tuns[msg.tun_id].erase(remove(tuns[msg.tun_id].begin(), tuns[msg.tun_id].end(), msg.tid), tuns[msg.tun_id].end());
+			
+			//pthread_mutex_lock(&lamport_lock);
 			lamport_queue.erase(remove(lamport_queue.begin(), lamport_queue.end(), msg.tid), lamport_queue.end());
+			//pthread_mutex_unlock(&lamport_lock);
 
 			pthread_mutex_lock(&cond_lock_top);
 			if(num_above()==0){
@@ -452,6 +467,8 @@ int main(int argc, char **argv)
 	MPI_Comm_size( MPI_COMM_WORLD, &n ); //how many processes
 	MPI_Comm_rank( MPI_COMM_WORLD, &tid ); //my id
 	printf("My id is %d from %d\n",tid, n);
+
+	lamport_queue.reserve(n);
 
 	pthread_create( &comm_thread, NULL, recv_thread , 0);
 	main_loop();
