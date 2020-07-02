@@ -67,7 +67,7 @@ pthread_t comm_thread; //The communication thread handle
 int n; //Rich people amount (if set to 0, communism.cpp takes over)
 
 bool all_resp_good = true; //If this remains true after all ack's we can get into the chosen tunnel queue
-bool awaiting_reps = false; //Flag indicating if we send back a req when someone requests a tunnel
+//bool awaiting_reps = false; //Flag indicating if we send back a req when someone requests a tunnel
 //bool releasing = false;//Like above, if anyone else comes to our tuns we need to send them REL too
 
 int tuns_tried = 0; //Every time we cannot secure a tunnel we increase this so that when it reaches the number of tunnels
@@ -101,6 +101,7 @@ void send(packet_t *pkt, int destination, int tag){
 }
 
 bool tuns_contains(int tun, int item){
+	if(tuns[tun].size()==0)return false;
 	if(find(tuns[tun].begin(), tuns[tun].end(), item) != tuns[tun].end()) {
     	return true;
 	} else {
@@ -129,6 +130,15 @@ bool choose_tunnel(){
 	for(int i = 0; i < n; i++){
 		send(&msg,i,TREQ_TAG);
 	}
+
+	/*printf("%d, %d TUNS LOOK LIKE THIS AFTER TREQS\n",tsi, tid);
+	for(int i = 0; i < T; i++){
+		printf("TUN %d\n",i);
+		for(int j = 0; j < tuns[i].size();j++){
+			printf("%d ",tuns[i][j]);
+		}
+		printf("\n");
+	}*/
 
 	printf("%d, %d sent TREQ to everyone\n",tsi,tid);
 
@@ -232,7 +242,7 @@ void go_through(){
 		send(&msg,tuns[tun_id][i],REQ_TAG);
 	}
 
-	awaiting_reps = true;
+	//awaiting_reps = true;
 	printf("%d, %d sent REQ to everyone in queue for %d\n",tsi,tid,tun_id);
 
 	if(size!=0){
@@ -246,7 +256,7 @@ void go_through(){
 		printf("%d, %d didn't need REP for %d\n",tsi,tid,tun_id);
 	}
 
-	awaiting_reps = false;
+	//awaiting_reps = false;
 
 	//if the tunnel has enough space we go thorugh, otherwise we wait for REL
 	int num = num_above();
@@ -285,18 +295,18 @@ void go_through(){
 	lamport_queue.erase(remove(lamport_queue.begin(), lamport_queue.end(), tid), lamport_queue.end());
 	//pthread_mutex_unlock(&lamport_lock);
 
-	//TODO: tuns is empty??
 	/*for(int i = 0; i < tuns[tun_id].size();i++){
 		msg.tsi = tsi;
 		msg.tun_id = tun_id;
 		send(&msg,tuns[tun_id][i],REL_TAG);
-		printf("%d, %d sent REL to %d\n",tsi,tid,tuns[tun_id][i]);
+		printf("%d, %d SENT REL TO %d !-----------------------!\n",tsi,tid,tuns[tun_id][i]);
 	}*/
+	//printf("SIZE %d\n",(int)tuns[tun_id].size());
 	for(int i = 0; i < n;i++){
 		msg.tsi = tsi;
 		msg.tun_id = tun_id;
 		send(&msg,i,REL_TAG);
-		//printf("%d, %d sent REL to %d\n",tsi,tid,tuns[tun_id][i]);
+		//printf("%d, %d SENT REL TO %d !-----------------------!\n",tsi,tid,i);
 	}
 	//releasing = true;
 
@@ -322,6 +332,7 @@ void *recv_thread(void *ptr){
 		
 		MPI_Recv( &msg, sizeof(packet_t), MPI_BYTE, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
 		lamport_clock(msg.tsi);
+		//printf("%d, msg's tun_id: %d\n",tsi,msg.tun_id);
 		//printf("%d, %d received something\n",tsi, tid);
 
 		switch (status.MPI_TAG){
@@ -334,19 +345,27 @@ void *recv_thread(void *ptr){
 		break;
 		case TREP_TAG:
 			trep_counter++;
-			printf("%d, %d received %d/%d TREP\n",tsi,tid,trep_counter,n-1);
-			if(msg.tun_id!=-1&&!tuns_contains(msg.tun_id,msg.tid)){
+			//printf("%d, %d received %d/%d TREP\n",tsi,tid,trep_counter,n-1);
+			//printf("GOT TREP WITH %d TUN_ID FROM %d\n",msg.tun_id,msg.tid);
+			//printf("CONTAINS RETURNS %d\n",tuns_contains(msg.tun_id,msg.tid));
+
+			//this will never fire because we always have the most recent
+			//tuns from TTAKE
+			/*if(msg.tun_id != -1 && tuns_contains(msg.tun_id,msg.tid)==false){ 
+				printf("FUCKFUCKFUCKFUCKFUCKFUCKFUCKFUCKFUCKFUCKFUCKFUCKFUCK\n");
 				tuns[msg.tun_id].push_back(msg.tid);
 				if(awaiting_reps){
 					resp.tsi = tsi;
 					send(&resp,msg.tid,REQ_TAG);
 				}
-				/*if(releasing){
-					resp.tsi = tsi;
-					resp.tun_id = tun_id;
-					send(&resp,msg.tid,REL_TAG);
-				}*/
-			}
+				//if(releasing){
+				//	resp.tsi = tsi;
+				//	resp.tun_id = tun_id;
+				//	send(&resp,msg.tid,REL_TAG);
+				//}
+			}else{
+				printf("AAAAAAAAAAA\n");
+			}*/
 			dir[msg.tun_id] = msg.dir;
 			pthread_mutex_lock(&cond_lock_tun_rep);
 			if(trep_counter==n-1){
@@ -360,7 +379,13 @@ void *recv_thread(void *ptr){
 			//printf("%d, %d received TTAKE from %d\n",tsi, tid, msg.tid);
 			if(msg.tun_id!=-1&&!tuns_contains(msg.tun_id,msg.tid)){
 				//printf("%d - about to push %d to %d in tuns\n", tsi, msg.tid,msg.tun_id);
+				//printf("PUSHED IN TTAKE\n");
 				tuns[msg.tun_id].push_back(msg.tid);
+				dir[msg.tun_id] = msg.dir;
+				/*if(awaiting_reps){
+					resp.tsi = tsi;
+					send(&resp,msg.tid,REQ_TAG);
+				}*/
 				//printf("%d - pushed %d to %d in tuns\n",tid,msg.tid,msg.tun_id);
 			}
 			if(msg.tun_id==tun_id){
@@ -377,7 +402,7 @@ void *recv_thread(void *ptr){
 		break;
 		case TACK_TAG:
 			tack_counter++;
-			printf("%d, %d received %d/%d TACK\n",tsi,tid,tack_counter,n-1);
+			//printf("%d, %d received %d/%d TACK\n",tsi,tid,tack_counter,n-1);
 			if(msg.resp==false)all_resp_good = false;
 			pthread_mutex_lock(&cond_lock_tun_ack);
 			if(tack_counter==n-1){
@@ -397,7 +422,7 @@ void *recv_thread(void *ptr){
 		break;
 		case REP_TAG:
 			rep_counter++;
-			printf("%d, %d received %d/%d REP\n",tsi,tid,rep_counter,(int)tuns[tun_id].size()-1);
+			//printf("%d, %d received %d/%d REP\n",tsi,tid,rep_counter,(int)tuns[tun_id].size()-1);
 			pthread_mutex_lock(&cond_lock_lamp);
 
 			if(rep_counter>=tuns[tun_id].size()-1){
@@ -418,11 +443,11 @@ void *recv_thread(void *ptr){
 			//pthread_mutex_lock(&lamport_lock);
 			lamport_queue.erase(remove(lamport_queue.begin(), lamport_queue.end(), msg.tid), lamport_queue.end());
 
-			printf("%d, %d got REL and it's lq now looks like this: ",tsi,tid);
+			/*printf("%d, %d got REL and it's lq now looks like this: ",tsi,tid);
 			for(int i = 0; i < lamport_queue.size(); i++){
 				printf("%d ",lamport_queue[i]);
 			}
-			printf("\n");
+			printf("\n");*/
 			//pthread_mutex_unlock(&lamport_lock);
 
 			pthread_mutex_lock(&cond_lock_got_rel);
@@ -430,7 +455,7 @@ void *recv_thread(void *ptr){
 			pthread_mutex_unlock(&cond_lock_got_rel);
 
 			pthread_mutex_lock(&cond_lock_top);
-			printf("%d, %d got REL and num_above is %d\n",tsi,tid,num_above());
+			//printf("%d, %d got REL and num_above is %d\n",tsi,tid,num_above());
 			if(num_above()==0){
 				at_top = true;
 				pthread_cond_signal(&cond_top);
