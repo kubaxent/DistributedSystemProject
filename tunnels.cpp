@@ -114,6 +114,7 @@ bool choose_tunnel(){
 	printf("%d, %d entered choose_tunnel\n",tsi,tid);
 
 	if(tuns_tried>=T){
+		printf("%d, %d tried all tunnels and is waiting for any REL\n",tsi,tid);
 		pthread_mutex_lock(&cond_lock_got_rel);
 		while (!got_rel){
 			pthread_cond_wait(&cond_got_rel,&cond_lock_got_rel);
@@ -125,9 +126,9 @@ bool choose_tunnel(){
 	//1.1 Get all other processes info about tunnels
 	packet_t msg;
 	msg.tid=tid;
-	msg.tsi=tsi;
 	
 	for(int i = 0; i < n; i++){
+		msg.tsi=tsi;
 		send(&msg,i,TREQ_TAG);
 	}
 
@@ -176,10 +177,10 @@ bool choose_tunnel(){
 	printf("%d, %d chose best tunnel - %d\n",tsi,tid,tun_id);
 
 	//1.4 - Sending TUN_TAKE to everyone else
-	msg.tsi = tsi;
 	msg.tun_id = tun_id;
 	msg.dir = cur_dir;
 	for(int i = 0; i < n; i++){
+		msg.tsi = tsi;
 		send(&msg,i,TTAKE_TAG);
 	}
 
@@ -191,11 +192,12 @@ bool choose_tunnel(){
 	pthread_mutex_unlock(&cond_lock_tun_ack);
 
 	if(all_resp_good==false){
-		msg.tsi = tsi;
+		
 		msg.tun_id = tun_id;
 		//We're not queing for this one after all so we're removing ourselves
 		//from the other processes tuns
 		for(int i = 0; i < n; i++){
+			msg.tsi = tsi;
 			send(&msg,i,CANCEL_TAG);
 		}
 		//After we sent it, we reset our local chosen tunnel and return false
@@ -234,10 +236,10 @@ void go_through(){
 
 	packet_t msg;
 	msg.tid = tid;
-	msg.tsi = tsi;
 
 	int size = tuns[tun_id].size();
 	for(int i = 0; i < size; i++){
+		msg.tsi = tsi;
 		printf("%d, %d sent REQ to %d for tunnel %d\n",tsi,tid,tuns[tun_id][i],tun_id);
 		send(&msg,tuns[tun_id][i],REQ_TAG);
 	}
@@ -296,14 +298,15 @@ void go_through(){
 	//pthread_mutex_unlock(&lamport_lock);
 
 	msg.tun_id = tun_id;
-	/*for(int i = 0; i < tuns[tun_id].size();i++){
+	for(int i = 0; i < tuns[tun_id].size();i++){
 		msg.tsi = tsi;
 		send(&msg,tuns[tun_id][i],REL_TAG);
-	}*/
-	for(int i = 0; i < n;i++){
+		printf("%d, %d sent REL to %d for tunnel %d @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n",tsi,tid,tuns[tun_id][i],tun_id);
+	}
+	/*for(int i = 0; i < n;i++){
 		msg.tsi = tsi;
 		send(&msg,i,REL_TAG);
-	}
+	}*/
 
 	//releasing = true;
 
@@ -346,24 +349,21 @@ void *recv_thread(void *ptr){
 			//printf("GOT TREP WITH %d TUN_ID FROM %d\n",msg.tun_id,msg.tid);
 			//printf("CONTAINS RETURNS %d\n",tuns_contains(msg.tun_id,msg.tid));
 
-			//this will never fire because we always have the most recent
-			//tuns from TTAKE
-			/*if(msg.tun_id != -1 && tuns_contains(msg.tun_id,msg.tid)==false){ 
+			if(msg.tun_id != -1 && tuns_contains(msg.tun_id,msg.tid)==false){ 
 				printf("FUCKFUCKFUCKFUCKFUCKFUCKFUCKFUCKFUCKFUCKFUCKFUCKFUCK\n");
 				tuns[msg.tun_id].push_back(msg.tid);
-				if(awaiting_reps){
+				dir[msg.tun_id] = msg.dir;
+				/*if(awaiting_reps){
 					resp.tsi = tsi;
 					send(&resp,msg.tid,REQ_TAG);
-				}
+				}*/
 				//if(releasing){
 				//	resp.tsi = tsi;
 				//	resp.tun_id = tun_id;
 				//	send(&resp,msg.tid,REL_TAG);
 				//}
-			}else{
-				printf("AAAAAAAAAAA\n");
-			}*/
-			dir[msg.tun_id] = msg.dir;
+			}
+			
 			pthread_mutex_lock(&cond_lock_tun_rep);
 			if(trep_counter==n-1){
 				trep_counter = 0;
@@ -452,7 +452,7 @@ void *recv_thread(void *ptr){
 			pthread_mutex_unlock(&cond_lock_got_rel);
 
 			pthread_mutex_lock(&cond_lock_top);
-			//printf("%d, %d got REL and num_above is %d\n",tsi,tid,num_above());
+			printf("%d, %d got REL and num_above is %d\n",tsi,tid,num_above());
 			if(num_above()==0){
 				at_top = true;
 				pthread_cond_signal(&cond_top);
