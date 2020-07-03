@@ -277,7 +277,7 @@ void go_through(){
 	int rand_num = rand() % 5 + 1;
 	sleep(rand_num); //simulating time taking to go through tunnel
 
-	printf("%d, %d is now at the end of tunnel %d and waiting to exit\n",tsi,tid,tun_id); 
+	printf("%d, %d is now at the end of tunnel %d and waiting to exit !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n",tsi,tid,tun_id); 
 
 	//Waiting for being at the top to leave the tunnel
 	num = num_above();
@@ -295,19 +295,16 @@ void go_through(){
 	lamport_queue.erase(remove(lamport_queue.begin(), lamport_queue.end(), tid), lamport_queue.end());
 	//pthread_mutex_unlock(&lamport_lock);
 
+	msg.tun_id = tun_id;
 	/*for(int i = 0; i < tuns[tun_id].size();i++){
 		msg.tsi = tsi;
-		msg.tun_id = tun_id;
 		send(&msg,tuns[tun_id][i],REL_TAG);
-		printf("%d, %d SENT REL TO %d !-----------------------!\n",tsi,tid,tuns[tun_id][i]);
 	}*/
-	//printf("SIZE %d\n",(int)tuns[tun_id].size());
 	for(int i = 0; i < n;i++){
 		msg.tsi = tsi;
-		msg.tun_id = tun_id;
 		send(&msg,i,REL_TAG);
-		//printf("%d, %d SENT REL TO %d !-----------------------!\n",tsi,tid,i);
 	}
+
 	//releasing = true;
 
 	printf("\n---\n%d, %d left tunnel %d and entered %s\n---\n",tsi,tid,tun_id,&(dir[0]));
