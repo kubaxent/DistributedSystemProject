@@ -21,8 +21,8 @@
 
 //Task costants
 #define X 10 //Squad size
-#define P 30 //Tunnel size
-#define T 3 //Tunnels amount
+#define P 20 //Tunnel size
+#define T 2 //Tunnels amount
 
 using namespace std;
 
@@ -114,6 +114,7 @@ bool choose_tunnel(){
 	printf("%d, %d entered choose_tunnel\n",tsi,tid);
 
 	if(tuns_tried>=T){
+		printf("%d, %d tried all tunnels and is now waiting for any REL\n",tsi, tid);
 		pthread_mutex_lock(&cond_lock_got_rel);
 		while (!got_rel){
 			pthread_cond_wait(&cond_got_rel,&cond_lock_got_rel);
@@ -125,11 +126,12 @@ bool choose_tunnel(){
 	//1.1 Get all other processes info about tunnels
 	packet_t msg;
 	msg.tid=tid;
-	msg.tsi=tsi;
 	
-	for(int i = 0; i < n; i++){
+	//AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+	/*for(int i = 0; i < n; i++){
+		msg.tsi=tsi;
 		send(&msg,i,TREQ_TAG);
-	}
+	}*/
 
 	/*printf("%d, %d TUNS LOOK LIKE THIS AFTER TREQS\n",tsi, tid);
 	for(int i = 0; i < T; i++){
@@ -140,16 +142,16 @@ bool choose_tunnel(){
 		printf("\n");
 	}*/
 
-	printf("%d, %d sent TREQ to everyone\n",tsi,tid);
+	//printf("%d, %d sent TREQ to everyone\n",tsi,tid);
 
-	pthread_mutex_lock(&cond_lock_tun_rep);
+	/*pthread_mutex_lock(&cond_lock_tun_rep);
 	while (!received_all_tun_rep)
 	{
 		pthread_cond_wait(&cond_tun_rep,&cond_lock_tun_rep);
 	}
 	pthread_mutex_unlock(&cond_lock_tun_rep);
 
-	printf("%d, %d got tun_rep from everyone\n",tsi,tid);
+	printf("%d, %d got tun_rep from everyone\n",tsi,tid);*/
 
 	//1.3 Finding the tunnel with the shortest queue
 	int shortest_queue_length = 999;
@@ -176,10 +178,11 @@ bool choose_tunnel(){
 	printf("%d, %d chose best tunnel - %d\n",tsi,tid,tun_id);
 
 	//1.4 - Sending TUN_TAKE to everyone else
-	msg.tsi = tsi;
+	
 	msg.tun_id = tun_id;
 	msg.dir = cur_dir;
 	for(int i = 0; i < n; i++){
+		msg.tsi = tsi;
 		send(&msg,i,TTAKE_TAG);
 	}
 
@@ -191,16 +194,17 @@ bool choose_tunnel(){
 	pthread_mutex_unlock(&cond_lock_tun_ack);
 
 	if(all_resp_good==false){
-		msg.tsi = tsi;
+		
 		msg.tun_id = tun_id;
 		//We're not queing for this one after all so we're removing ourselves
 		//from the other processes tuns
 		for(int i = 0; i < n; i++){
+			msg.tsi = tsi;
 			send(&msg,i,CANCEL_TAG);
 		}
 		//After we sent it, we reset our local chosen tunnel and return false
 		printf("%d, %d's tunnel - %d - was contested, going back to finding \n",tsi,tid,tun_id);
-		tun_id = -1;
+		//tun_id = -1; Doing it in cleanup
 		tuns_tried++;
 		return false;
 	}else{
@@ -234,10 +238,10 @@ void go_through(){
 
 	packet_t msg;
 	msg.tid = tid;
-	msg.tsi = tsi;
-
+	
 	int size = tuns[tun_id].size();
 	for(int i = 0; i < size; i++){
+		msg.tsi = tsi;
 		printf("%d, %d sent REQ to %d for tunnel %d\n",tsi,tid,tuns[tun_id][i],tun_id);
 		send(&msg,tuns[tun_id][i],REQ_TAG);
 	}
@@ -296,14 +300,15 @@ void go_through(){
 	//pthread_mutex_unlock(&lamport_lock);
 
 	msg.tun_id = tun_id;
-	/*for(int i = 0; i < tuns[tun_id].size();i++){
+	for(int i = 0; i < tuns[tun_id].size();i++){
 		msg.tsi = tsi;
 		send(&msg,tuns[tun_id][i],REL_TAG);
-	}*/
-	for(int i = 0; i < n;i++){
+		printf("%d, %d sent REL to %d\n",tsi,tid,tuns[tun_id][i]);
+	}
+	/*for(int i = 0; i < n;i++){
 		msg.tsi = tsi;
 		send(&msg,i,REL_TAG);
-	}
+	}*/
 
 	//releasing = true;
 
@@ -363,7 +368,7 @@ void *recv_thread(void *ptr){
 			}else{
 				printf("AAAAAAAAAAA\n");
 			}*/
-			dir[msg.tun_id] = msg.dir;
+			//dir[msg.tun_id] = msg.dir;
 			pthread_mutex_lock(&cond_lock_tun_rep);
 			if(trep_counter==n-1){
 				trep_counter = 0;
