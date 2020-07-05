@@ -302,11 +302,6 @@ void go_through(){
 	//pthread_mutex_unlock(&lamport_lock);
 
 	msg.tun_id = tun_id;
-	/*for(int i = 0; i < tuns[tun_id].size();i++){
-		msg.tsi = tsi;
-		send(&msg,tuns[tun_id][i],REL_TAG);
-		printf("%d, %d sent REL to %d for tunnel %d @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n",tsi,tid,tuns[tun_id][i],tun_id);
-	}*/
 	for(int i = 0; i < n;i++){
 		msg.tsi = tsi;
 		send(&msg,i,REL_TAG);
