@@ -17,7 +17,7 @@
 #define TREP_TAG 50
 #define TTAKE_TAG 60
 #define TACK_TAG 70
-#define CANCEL_TAG 80
+//#define CANCEL_TAG 80
 
 //Task costants
 #define X 10 //Squad size
@@ -73,6 +73,8 @@ pthread_cond_t cond_got_rel = PTHREAD_COND_INITIALIZER;
 pthread_t comm_thread; //The communication thread handle
 int n; //Rich people amount (if set to 0, communism.cpp takes over)
 
+//int num_of_expected_reps = 0;
+
 bool all_resp_good = true; //If this remains true after all ack's we can get into the chosen tunnel queue
 bool awaiting_reps = false; //Flag indicating if we send back a req when someone requests a tunnel
 //bool releasing = false;//Like above, if anyone else comes to our tuns we need to send them REL too
@@ -104,7 +106,7 @@ void lamport_clock(int sender_time = -1){
 void send(packet_t *pkt, int destination, int tag){
 	if(destination!=tid){
 		MPI_Send(pkt, sizeof(packet_t), MPI_BYTE, destination, tag, MPI_COMM_WORLD);
-		//lamport_clock();
+		lamport_clock();
 	}
 }
 
@@ -223,7 +225,7 @@ bool choose_tunnel(){
 		//from the other processes tuns
 		for(int i = 0; i < n; i++){
 			msg.tsi = tsi;
-			send(&msg,i,CANCEL_TAG);
+			send(&msg,i,REL_TAG);
 		}
 		//After we sent it, we reset our local chosen tunnel and return false
 		printf("%d, %d's tunnel - %d - was contested, going back to finding \n",tsi,tid,tun_id);
@@ -269,7 +271,6 @@ void lamport_remove(int rem_tid){
 	for(int i = 0; i < lamport_queue.size(); i++){
 		if(lamport_queue[i].tid==rem_tid){
 			lamport_queue.erase(lamport_queue.begin() + i);
-
 			return;
 		}
 	}
@@ -295,6 +296,7 @@ void go_through(){
 	msg.tid = tid;
 
 	int size = tuns[tun_id].size();
+	//num_of_expected_reps = size;
 	for(int i = 0; i < size; i++){
 		msg.tsi = tsi;
 		printf("%d, %d sent REQ to %d for tunnel %d\n",tsi,tid,tuns[tun_id][i],tun_id);
@@ -304,7 +306,7 @@ void go_through(){
 	printf("%d, %d sent REQ to everyone in queue for %d\n",tsi,tid,tun_id);
 	//awaiting_reps = true;
 
-	//if(size!=0){
+	//if(size!=0){ //TODO: Do we need this?
 		pthread_mutex_lock(&cond_lock_lamp);
 		while (!received_all_lamp){
 			//printf("%d, %d WHYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYY\n",tsi,tid);
@@ -313,15 +315,20 @@ void go_through(){
 		pthread_mutex_unlock(&cond_lock_lamp);
 		printf("%d, %d got REP from everyone waiting for tunnel %d\n",tsi,tid,tun_id);
 	//}else{
-		//printf("%d, %d didn't need REP for %d\n",tsi,tid,tun_id);
+	//	printf("%d, %d didn't need REP for %d\n",tsi,tid,tun_id);
 	//}
 
 	lamport_clock();
-	//awaiting_reps = false; //moved to recv 
+	awaiting_reps = false; 
 
 	//if the tunnel has enough space we go through, otherwise we wait for REL
 	int num = num_above();
 	printf("%d, %d, %d, %d **************************\n",tsi, tid, num*X, P-X);
+	/*printf("%d, %d's lamport when ****************************************\n",tsi,tid);
+	for(int i = 0; i < lamport_queue.size(); i++){
+		printf("%d ",lamport_queue[i].tid);
+	}
+	printf("\n");*/
 	if(num != -1 && ((num * X) <= (P - X))==false){
 		pthread_mutex_lock(&cond_lock_space);
 		while (!enough_space){
@@ -399,7 +406,7 @@ void *recv_thread(void *ptr){
 	while(true){
 		
 		MPI_Recv( &msg, sizeof(packet_t), MPI_BYTE, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
-		lamport_clock(msg.tsi);
+		//lamport_clock(msg.tsi);
 		//printf("%d, msg's tun_id: %d\n",tsi,msg.tun_id);
 		//printf("%d, %d received something\n",tsi, tid);
 
@@ -450,12 +457,10 @@ void *recv_thread(void *ptr){
 
 				//printf("%d - pushed %d to %d in tuns\n",tid,msg.tid,msg.tun_id);
 			}
-			if(msg.tun_id==tun_id){
-				if(msg.dir==cur_dir){
-					resp.resp=true;
-				}else{
-					resp.resp=false;
-				}
+			resp.resp = true; //true by default
+			if(msg.tun_id==tun_id && msg.dir!=cur_dir){
+				//printf("%d, %d, supposedly different: %d and %d - fuckfuckfuckfuckfuckfuckfuckfuckfuckfuckfuckfuck\n",tsi,tid,msg.dir,cur_dir);
+				resp.resp=false;
 			}
 			resp.tsi = tsi;
 			resp.tun_id = tun_id;
@@ -490,18 +495,19 @@ void *recv_thread(void *ptr){
 			printf("%d, %d received %d/%d REP\n",tsi,tid,rep_counter,(int)tuns[tun_id].size());
 			pthread_mutex_lock(&cond_lock_lamp);
 
-			if(rep_counter==tuns[tun_id].size()){
+			if(rep_counter>=tuns[tun_id].size()){
 				rep_counter = 0;
 				received_all_lamp = true;
-				awaiting_reps = false;
+				//awaiting_reps = false;
 				pthread_cond_signal(&cond_lamp);
 			}
 			pthread_mutex_unlock(&cond_lock_lamp);
 		break;
-		case CANCEL_TAG:
+		/*case CANCEL_TAG:
 			tuns[msg.tun_id].erase(remove(tuns[msg.tun_id].begin(), tuns[msg.tun_id].end(), msg.tid), tuns[msg.tun_id].end());
+			lamport_remove(msg.tid);
 			if(tuns[msg.tun_id].size()==0)dir[msg.tun_id]=0;
-		break;
+		break;*/
 		case REL_TAG:
 			//printf("%d, %d received REL from %d\n",tsi, tid, msg.tid);
 			
@@ -544,7 +550,7 @@ void *recv_thread(void *ptr){
 		printf("%d, %d RECEIVED UNTAGGED MESSAGE, PANIC\n",tsi, tid);
 			break;
 		}
-		//printf("I'm %d, got message from %d with timestamp %d\n",tid,msg.tid,msg.tsi);
+		lamport_clock(msg.tsi);
 	}
 	
 	lamport_clock();
