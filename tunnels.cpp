@@ -105,8 +105,9 @@ void lamport_clock(int sender_time = -1){
 
 void send(packet_t *pkt, int destination, int tag){
 	if(destination!=tid){
-		MPI_Send(pkt, sizeof(packet_t), MPI_BYTE, destination, tag, MPI_COMM_WORLD);
 		lamport_clock();
+		pkt->tsi=tsi;
+		MPI_Send(pkt, sizeof(packet_t), MPI_BYTE, destination, tag, MPI_COMM_WORLD);
 	}
 }
 
@@ -135,6 +136,7 @@ bool tuns_contains(int tun, int item){
 }*/
 
 bool choose_tunnel(){
+	lamport_clock();
 
 	//awaiting_reps = true;
 
@@ -157,7 +159,7 @@ bool choose_tunnel(){
 	msg.tid=tid;
 	
 	for(int i = 0; i < n; i++){
-		msg.tsi=tsi;
+		//msg.tsi=tsi;
 		send(&msg,i,TREQ_TAG);
 	}
 
@@ -210,7 +212,7 @@ bool choose_tunnel(){
 	msg.tun_id = tun_id;
 	msg.dir = cur_dir;
 	for(int i = 0; i < n; i++){
-		msg.tsi = tsi;
+		//msg.tsi = tsi;
 		send(&msg,i,TTAKE_TAG);
 	}
 
@@ -230,7 +232,7 @@ bool choose_tunnel(){
 		//We're not queing for this one after all so we're removing ourselves
 		//from the other processes tuns
 		for(int i = 0; i < n; i++){
-			msg.tsi = tsi;
+			//msg.tsi = tsi;
 			send(&msg,i,REL_TAG);
 		}
 		//After we sent it, we reset our local chosen tunnel and return false
@@ -300,8 +302,6 @@ void go_through(){
 
 	//lamport_clock();
 
-	awaiting_reps = true;
-
 	printf("%d, %d added itself to it's lamport queue\n",tsi,tid);
 
 	packet_t msg;
@@ -310,13 +310,13 @@ void go_through(){
 	int size = tuns[tun_id].size();
 	//num_of_expected_reps = size;
 	for(int i = 0; i < size; i++){
-		msg.tsi = tsi;
+		//msg.tsi = tsi;
 		printf("%d, %d sent REQ to %d for tunnel %d\n",tsi,tid,tuns[tun_id][i].tid,tun_id);
 		send(&msg,tuns[tun_id][i].tid,REQ_TAG);
 	}
 
 	printf("%d, %d sent REQ to everyone in queue for %d\n",tsi,tid,tun_id);
-	//awaiting_reps = true;
+	awaiting_reps = true;
 
 	if(size!=0){ //TODO: Do we need this?
 		pthread_mutex_lock(&cond_lock_lamp);
@@ -336,11 +336,11 @@ void go_through(){
 	//if the tunnel has enough space we go through, otherwise we wait for REL
 	int num = num_above();
 	printf("%d, %d, %d, %d **************************\n",tsi, tid, num*X, P-X);
-	/*printf("%d, %d's lamport when ****************************************\n",tsi,tid);
-	for(int i = 0; i < lamport_queue.size(); i++){
-		printf("%d ",lamport_queue[i].tid);
+	printf("\n%d, %d's lamport when wanting to\n",tsi,tid);
+	for(int i = 0; i < tuns[tun_id].size(); i++){
+		printf("(%d)%d(%d) ",tid,tuns[tun_id][i].tid, tuns[tun_id][i].tsi);
 	}
-	printf("\n");*/
+	printf("\n");
 	if(num != -1 && ((num * X) <= (P - X))==false){
 		pthread_mutex_lock(&cond_lock_space);
 		while (!enough_space){
@@ -359,12 +359,12 @@ void go_through(){
 	sleep(rand_num); //simulating time taking to go through tunnel
 	lamport_clock();
 
-	printf("%d, %d is now at the end of tunnel %d and waiting to exit !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n",tsi,tid,tun_id); 
-	printf("\n%d, %d's lamport when waiting\n",tsi,tid);
+	printf("%d, %d is now at the end of tunnel %d and waiting to exit !!!!!!!!!!!!!!!!!!!!!!\n",tsi,tid,tun_id); 
+	/*printf("\n%d, %d's lamport when waiting\n",tsi,tid);
 	for(int i = 0; i < tuns[tun_id].size(); i++){
-		printf("%d ",tuns[tun_id][i].tid);
+		printf("(%d)%d(%d) ",tid,tuns[tun_id][i].tid, tuns[tun_id][i].tsi);
 	}
-	printf("\n");
+	printf("\n");*/
 
 	//Waiting for being at the top to leave the tunnel
 	num = num_above();
@@ -386,7 +386,7 @@ void go_through(){
 
 	msg.tun_id = tun_id;
 	for(int i = 0; i < tuns[tun_id].size();i++){
-		msg.tsi = tsi;
+		//msg.tsi = tsi;
 		send(&msg,tuns[tun_id][i].tid,REL_TAG);
 	}
 	/*for(int i = 0; i < n;i++){
@@ -418,7 +418,7 @@ void *recv_thread(void *ptr){
 	while(true){
 		
 		MPI_Recv( &msg, sizeof(packet_t), MPI_BYTE, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
-		//lamport_clock(msg.tsi);
+		lamport_clock(msg.tsi);
 		//printf("%d, msg's tun_id: %d\n",tsi,msg.tun_id);
 		//printf("%d, %d received something\n",tsi, tid);
 
@@ -573,7 +573,7 @@ void *recv_thread(void *ptr){
 		printf("%d, %d RECEIVED UNTAGGED MESSAGE, PANIC\n",tsi, tid);
 			break;
 		}
-		lamport_clock(msg.tsi);
+		//lamport_clock(msg.tsi);
 	}
 	
 	lamport_clock();
