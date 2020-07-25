@@ -10,11 +10,11 @@
 #include <algorithm> 
 
 //Message tags
-#define REQ_TAG 10
-#define REP_TAG 20
+//#define REQ_TAG 10
+//#define REP_TAG 20
 #define REL_TAG 30
-#define TREQ_TAG 40
-#define TREP_TAG 50
+//#define TREQ_TAG 40
+//#define TREP_TAG 50
 #define TTAKE_TAG 60
 #define TACK_TAG 70
 //#define CANCEL_TAG 80
@@ -44,17 +44,17 @@ vector<lamp_request> tuns[T]; //Array of vectors of tunnels waiting for/being in
 
 //Bools, mutexes and conditions for every time we need to wait for a response from all/several other processes
 //Used to avoid active waiting
-bool received_all_tun_rep = false;
+/*bool received_all_tun_rep = false;
 pthread_mutex_t cond_lock_tun_rep = PTHREAD_MUTEX_INITIALIZER;
-pthread_cond_t cond_tun_rep = PTHREAD_COND_INITIALIZER;
+pthread_cond_t cond_tun_rep = PTHREAD_COND_INITIALIZER;*/
 
 bool received_all_tun_ack = false;
 pthread_mutex_t cond_lock_tun_ack = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t cond_tun_ack = PTHREAD_COND_INITIALIZER;
 
-bool received_all_lamp = false;
+/*bool received_all_lamp = false;
 pthread_mutex_t cond_lock_lamp = PTHREAD_MUTEX_INITIALIZER;
-pthread_cond_t cond_lamp = PTHREAD_COND_INITIALIZER;
+pthread_cond_t cond_lamp = PTHREAD_COND_INITIALIZER;*/
 
 bool enough_space = false;
 pthread_mutex_t cond_lock_space = PTHREAD_MUTEX_INITIALIZER;
@@ -72,6 +72,8 @@ pthread_cond_t cond_got_rel = PTHREAD_COND_INITIALIZER;
 
 pthread_t comm_thread; //The communication thread handle
 int n; //Rich people amount (if set to 0, communism.cpp takes over)
+
+//int my_lamp_tsi = -1;
 
 //int num_of_expected_reps = 0;
 
@@ -103,10 +105,12 @@ void lamport_clock(int sender_time = -1){
 	}
 }
 
-void send(packet_t *pkt, int destination, int tag){
+void send(packet_t *pkt, int destination, int tag, bool clock = false){
 	if(destination!=tid){
-		lamport_clock();
-		pkt->tsi=tsi;
+		if(clock){
+			lamport_clock();
+			pkt->tsi=tsi;
+		}
 		MPI_Send(pkt, sizeof(packet_t), MPI_BYTE, destination, tag, MPI_COMM_WORLD);
 	}
 }
@@ -135,6 +139,44 @@ bool tuns_contains(int tun, int item){
 	}
 }*/
 
+//TODO: doesn't account for more than one pair of same times
+void tuns_ordered_push(lamp_request req, int tun = -1){
+	int t;
+	if(tun==-1){
+		t = tun_id;
+	}else{
+		t = tun;
+	}
+	if(tuns[t].size()==0){
+		tuns[t].push_back(req);
+		return;
+	}
+	for(int i = 0; i < tuns[t].size(); i++){
+		if(req.tsi==tuns[t][i].tsi){
+			if(req.tid < tuns[t][i].tid){
+				tuns[t].insert(tuns[t].begin() + i,req);
+			}else{
+				tuns[t].insert(tuns[t].begin() + i + 1,req);
+			}
+			return;
+		}
+		if(req.tsi < tuns[t][i].tsi){
+			tuns[t].insert(tuns[t].begin() + i,req);
+			return;
+		}
+	}
+	tuns[t].push_back(req);
+}
+
+void tuns_remove(int rem_tid){
+	for(int i = 0; i < tuns[tun_id].size(); i++){
+		if(tuns[tun_id][i].tid==rem_tid){
+			tuns[tun_id].erase(tuns[tun_id].begin() + i);
+			return;
+		}
+	}
+}
+
 bool choose_tunnel(){
 	lamport_clock();
 
@@ -142,6 +184,7 @@ bool choose_tunnel(){
 
 	printf("%d, %d entered choose_tunnel\n",tsi,tid);
 
+	//TODO: this is broken, because the process isn't in any queue so when someone leaves any tunnel it doesn't even get notified
 	if(tuns_tried>=T){
 		printf("%d, %d tried all tunnels and is waiting for any REL\n",tsi,tid);
 		pthread_mutex_lock(&cond_lock_got_rel);
@@ -152,25 +195,16 @@ bool choose_tunnel(){
 		tuns_tried=0;
 		got_rel = false;
 	}
-	lamport_clock();
+	//lamport_clock();
 
 	//1.1 Get all other processes info about tunnels
 	packet_t msg;
 	msg.tid=tid;
 	
-	for(int i = 0; i < n; i++){
+	/*for(int i = 0; i < n; i++){
 		//msg.tsi=tsi;
 		send(&msg,i,TREQ_TAG);
 	}
-
-	/*printf("%d, %d TUNS LOOK LIKE THIS AFTER TREQS\n",tsi, tid);
-	for(int i = 0; i < T; i++){
-		printf("TUN %d\n",i);
-		for(int j = 0; j < tuns[i].size();j++){
-			printf("%d ",tuns[i][j]);
-		}
-		printf("\n");
-	}*/
 
 	printf("%d, %d sent TREQ to everyone\n",tsi,tid);
 
@@ -181,7 +215,7 @@ bool choose_tunnel(){
 	}
 	pthread_mutex_unlock(&cond_lock_tun_rep);
 
-	printf("%d, %d got tun_rep from everyone\n",tsi,tid);
+	printf("%d, %d got tun_rep from everyone\n",tsi,tid);*/
 	lamport_clock();
 
 	//1.3 Finding the tunnel with the shortest queue
@@ -208,11 +242,20 @@ bool choose_tunnel(){
 
 	printf("%d, %d chose best tunnel - %d\n",tsi,tid,tun_id);
 
+	lamport_clock();
+
+	lamp_request req;
+	req.tid = tid;
+	req.tsi = tsi; //This is the time we're going with when sending requests
+	tuns_ordered_push(req);
+
+	printf("%d, %d added itself to chosen tunnel's queue\n",tsi,tid);
+
 	//1.4 - Sending TUN_TAKE to everyone else
 	msg.tun_id = tun_id;
 	msg.dir = cur_dir;
+	msg.tsi = tsi;
 	for(int i = 0; i < n; i++){
-		//msg.tsi = tsi;
 		send(&msg,i,TTAKE_TAG);
 	}
 
@@ -220,7 +263,7 @@ bool choose_tunnel(){
 
 	//1.6 - If nobody is contesting from the other side we're good to go
 	pthread_mutex_lock(&cond_lock_tun_ack);
-	while (!received_all_tun_rep){
+	while (!received_all_tun_ack){
 		pthread_cond_wait(&cond_tun_ack,&cond_lock_tun_ack);
 	}
 	pthread_mutex_unlock(&cond_lock_tun_ack);
@@ -233,8 +276,9 @@ bool choose_tunnel(){
 		//from the other processes tuns
 		for(int i = 0; i < n; i++){
 			//msg.tsi = tsi;
-			send(&msg,i,REL_TAG);
+			send(&msg,i,REL_TAG,true);
 		}
+		tuns_remove(tid);
 		//After we sent it, we reset our local chosen tunnel and return false
 		printf("%d, %d's tunnel - %d - was contested, going back to finding \n",tsi,tid,tun_id);
 		tun_id = -1;
@@ -261,53 +305,24 @@ int num_above(){
 	
 }
 
-void tuns_ordered_push(lamp_request req, int tun = -1){
-	int t;
-	if(tun==-1){
-		t = tun_id;
-	}else{
-		t = tun;
-	}
-	if(tuns[t].size()==0){
-		tuns[t].push_back(req);
-		return;
-	}
-	for(int i = 0; i < tuns[t].size(); i++){
-		if(req.tsi < tuns[t][i].tsi){
-			tuns[t].insert(tuns[t].begin() + i,req);
-			return;
-		}
-	}
-	tuns[t].push_back(req);
-}
-
-void tuns_remove(int rem_tid){
-	for(int i = 0; i < tuns[tun_id].size(); i++){
-		if(tuns[tun_id][i].tid==rem_tid){
-			tuns[tun_id].erase(tuns[tun_id].begin() + i);
-			return;
-		}
-	}
-}
-
 void go_through(){
 	//pthread_mutex_lock(&lamport_lock);
 
 	
-	//TODO: FOR SOME GODDAMN REASON EVERY FUCKING PROCESS THINKS IT'S THE FIRST IN QUEUE
-	lamp_request req;
+	/*lamp_request req;
 	req.tid = tid;
 	req.tsi = tsi;
 	tuns_ordered_push(req);
+	//my_lamp_tsi = req.tsi;
 
 	//lamport_clock();
 
-	printf("%d, %d added itself to it's lamport queue\n",tsi,tid);
+	printf("%d, %d added itself to it's lamport queue\n",tsi,tid);*/
 
 	packet_t msg;
 	msg.tid = tid;
 
-	int size = tuns[tun_id].size();
+	/*int size = tuns[tun_id].size();
 	//num_of_expected_reps = size;
 	for(int i = 0; i < size; i++){
 		//msg.tsi = tsi;
@@ -318,7 +333,7 @@ void go_through(){
 	printf("%d, %d sent REQ to everyone in queue for %d\n",tsi,tid,tun_id);
 	awaiting_reps = true;
 
-	if(size!=0){ //TODO: Do we need this?
+	if(size!=0){ 
 		pthread_mutex_lock(&cond_lock_lamp);
 		while (!received_all_lamp){
 			//printf("%d, %d WHYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYY\n",tsi,tid);
@@ -329,9 +344,10 @@ void go_through(){
 	}else{
 		printf("%d, %d didn't need REP for %d\n",tsi,tid,tun_id);
 	}
+	awaiting_reps = false; */
 
 	lamport_clock();
-	awaiting_reps = false; 
+	
 
 	//if the tunnel has enough space we go through, otherwise we wait for REL
 	int num = num_above();
@@ -387,7 +403,7 @@ void go_through(){
 	msg.tun_id = tun_id;
 	for(int i = 0; i < tuns[tun_id].size();i++){
 		//msg.tsi = tsi;
-		send(&msg,tuns[tun_id][i].tid,REL_TAG);
+		send(&msg,tuns[tun_id][i].tid,REL_TAG,true);
 	}
 	/*for(int i = 0; i < n;i++){
 		msg.tsi = tsi;
@@ -414,7 +430,7 @@ void *recv_thread(void *ptr){
 	packet_t msg;
 	packet_t resp;
 	resp.tid = tid;
-
+	
 	while(true){
 		
 		MPI_Recv( &msg, sizeof(packet_t), MPI_BYTE, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
@@ -423,9 +439,9 @@ void *recv_thread(void *ptr){
 		//printf("%d, %d received something\n",tsi, tid);
 
 		switch (status.MPI_TAG){
-		case TREQ_TAG:
+		/*case TREQ_TAG:
 			//printf("%d, %d received TREQ from %d\n",tsi, tid, msg.tid);
-			resp.tsi = tsi;
+			//resp.tsi = tsi;
 			resp.tun_id = tun_id;
 			resp.dir = cur_dir;
 			send(&resp,msg.tid,TREP_TAG);
@@ -434,21 +450,21 @@ void *recv_thread(void *ptr){
 			trep_counter++;
 			//printf("%d, %d received %d/%d TREP\n",tsi,tid,trep_counter,n-1);
 
-			if(msg.tun_id != -1 && tuns_contains(msg.tun_id,msg.tid)==false){ 
+			//if(msg.tun_id != -1 && tuns_contains(msg.tun_id,msg.tid)==false){ 
 				
 				//tuns[msg.tun_id].push_back(msg.tid);
-				lamp_request req;
-				req.tsi = msg.tsi;
-				req.tid = msg.tid;
-				tuns_ordered_push(req, msg.tun_id);
+			//	lamp_request req;
+			//	req.tsi = msg.tsi;
+			//	req.tid = msg.tid;
+			//	tuns_ordered_push(req, msg.tun_id);
 				
-				dir[msg.tun_id] = msg.dir;
+			//	dir[msg.tun_id] = msg.dir;
 				//if(releasing){
 				//	resp.tsi = tsi;
 				//	resp.tun_id = tun_id;
 				//	send(&resp,msg.tid,REL_TAG);
 				//}
-			}
+			//}
 			
 			pthread_mutex_lock(&cond_lock_tun_rep);
 			if(trep_counter==n-1){
@@ -457,8 +473,8 @@ void *recv_thread(void *ptr){
 				pthread_cond_signal(&cond_tun_rep);
 			}
 			pthread_mutex_unlock(&cond_lock_tun_rep);
-		break;
-		case TTAKE_TAG:
+		break;*/
+		case TTAKE_TAG: //REQ
 			//printf("%d, %d received TTAKE from %d\n",tsi, tid, msg.tid);
 			if(msg.tun_id!=-1&&!tuns_contains(msg.tun_id,msg.tid)){
 				//printf("%d - about to push %d to %d in tuns\n", tsi, msg.tid,msg.tun_id);
@@ -470,11 +486,11 @@ void *recv_thread(void *ptr){
 				
 				dir[msg.tun_id] = msg.dir;
 				
-				if(awaiting_reps){
+				/*if(awaiting_reps){
 					printf("%d, %d sent ADDITIONAL REQ to %d\n",tsi,tid,msg.tid);
-					resp.tsi = tsi;
+					//resp.tsi = tsi;
 					send(&resp,msg.tid,REQ_TAG);
-				}
+				}*/
 
 				//printf("%d - pushed %d to %d in tuns\n",tid,msg.tid,msg.tun_id);
 			}
@@ -488,7 +504,7 @@ void *recv_thread(void *ptr){
 			resp.dir = cur_dir;
 			send(&resp,msg.tid,TACK_TAG);
 		break;
-		case TACK_TAG:
+		case TACK_TAG: //REP
 			tack_counter++;
 			//printf("%d, %d received %d/%d TACK\n",tsi,tid,tack_counter,n-1);
 			if(msg.resp==false)all_resp_good = false;
@@ -500,7 +516,7 @@ void *recv_thread(void *ptr){
 			}
 			pthread_mutex_unlock(&cond_lock_tun_ack);
 		break;
-		case REQ_TAG:
+		/*case REQ_TAG:
 			//printf("%d, %d received REQ from %d\n",tsi, tid, msg.tid);
 			//pthread_mutex_lock(&lamport_lock);
 			//lamp_request req;
@@ -508,7 +524,7 @@ void *recv_thread(void *ptr){
 			//req.tsi = msg.tsi;
 			//lamport_queue.push_back(req);
 			//tuns_ordered_push(req);
-			resp.tsi = tsi;
+			//resp.tsi = tsi;//(my_lamp_tsi==-1)?tsi:my_lamp_tsi;
 			send(&resp,msg.tid,REP_TAG);
 		break;
 		case REP_TAG:
@@ -523,7 +539,7 @@ void *recv_thread(void *ptr){
 				pthread_cond_signal(&cond_lamp);
 			}
 			pthread_mutex_unlock(&cond_lock_lamp);
-		break;
+		break;*/
 		/*case CANCEL_TAG:
 			tuns[msg.tun_id].erase(remove(tuns[msg.tun_id].begin(), tuns[msg.tun_id].end(), msg.tid), tuns[msg.tun_id].end());
 			lamport_remove(msg.tid);
@@ -583,9 +599,9 @@ void cleanup(){
 	tun_id = -1;
 	enough_space = false;
 	at_top = false;
-	received_all_lamp = false;
+	//received_all_lamp = false;
 	received_all_tun_ack = false;
-	received_all_tun_rep = false;
+	//received_all_tun_rep = false;
 	all_resp_good = true;
 }
 
