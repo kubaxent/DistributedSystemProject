@@ -14,10 +14,12 @@
 #define TTAKE_TAG 60
 #define TACK_TAG 70
 
+#define DEBUG false
+
 //Task costants
 #define X 10 //Squad size
 #define P 30 //Tunnel size
-#define T 4 //Tunnels amount
+#define T 2 //Tunnels amount
 
 using namespace std;
 
@@ -153,7 +155,7 @@ void update_dir(int tun){
 bool choose_tunnel(){
 	lamport_clock();
 
-	printf("%d, %d entered choose_tunnel\n",tsi,tid);
+	if(DEBUG)printf("%d, %d entered choose_tunnel\n",tsi,tid);
 
 	//TODO: this is broken
 	/*if(tuns_tried>=T){
@@ -175,7 +177,8 @@ bool choose_tunnel(){
 	//1.3 Finding the tunnel with the shortest queue
 	int shortest_queue_length = 999;
 	int best_tunnel = -1; //In case for some reason we don't find one we default to the first one
-	for(int i = 0; i < T; i++){
+	int random_start = rand() % n;
+	for(int i = random_start; i < T; (i++)%T){
 		if(tuns[i].size()==0){
 			best_tunnel = i;
 			break;
@@ -196,7 +199,7 @@ bool choose_tunnel(){
 		return false;
 	}*/
 
-	printf("%d, %d chose best tunnel - %d\n",tsi,tid,tun_id);
+	if(DEBUG)("%d, %d chose best tunnel - %d\n",tsi,tid,tun_id);
 
 	lamport_clock();
 
@@ -207,7 +210,7 @@ bool choose_tunnel(){
 	tuns_ordered_push(req);
 	update_dir(tun_id);
 
-	printf("%d, %d added itself to chosen tunnel's queue\n",tsi,tid);
+	if(DEBUG)printf("%d, %d added itself to chosen tunnel's queue\n",tsi,tid);
 
 	//1.4 - Sending TUN_TAKE to everyone else
 	msg.tun_id = tun_id;
@@ -217,7 +220,7 @@ bool choose_tunnel(){
 		send(&msg,i,TTAKE_TAG);
 	}
 
-	printf("%d, %d sent TTAKE to everyone\n",tsi,tid);
+	if(DEBUG)printf("%d, %d sent TTAKE to everyone\n",tsi,tid);
 
 	//1.6 - If nobody is contesting from the other side we're good to go
 	pthread_mutex_lock(&cond_lock_tun_ack);
@@ -225,7 +228,7 @@ bool choose_tunnel(){
 		pthread_cond_wait(&cond_tun_ack,&cond_lock_tun_ack);
 	}
 	pthread_mutex_unlock(&cond_lock_tun_ack);
-	lamport_clock();
+	//lamport_clock();
 
 	if(all_resp_good==false){
 		
@@ -239,12 +242,12 @@ bool choose_tunnel(){
 		tuns_remove(tid,tun_id);
 		update_dir(tun_id);
 		//After we sent it, we reset our local chosen tunnel and return false
-		printf("%d, %d's tunnel - %d - was contested, going back to finding \n",tsi,tid,tun_id);
+		if(DEBUG)printf("%d, %d's tunnel - %d - was contested, going back to finding \n",tsi,tid,tun_id);
 		tun_id = -1;
 		//tuns_tried++;
 		return false;
 	}else{
-		printf("%d, %d secured tunnel - %d\n",tsi,tid,tun_id);
+		if(DEBUG)printf("%d, %d secured tunnel - %d\n",tsi,tid,tun_id);
 		return true;
 	}
 
@@ -287,18 +290,18 @@ void go_through(){
 		}
 		pthread_mutex_unlock(&cond_lock_space);
 	}
-	printf("%d, %d now has enough space to enter tunnel %d\n",tsi,tid,tun_id);
+	if(DEBUG)printf("%d, %d now has enough space to enter tunnel %d\n",tsi,tid,tun_id);
 
 	string dir = (cur_dir==1)?"paradise":"the real world";
 	printf("\n---\n%d, %d entered tunnel %d to %s.\n---\n",tsi, tid,tun_id,&(dir[0]));
 	//printf("%d, tunnel %d is now at %d/%d capacity and directed to %s\n",tsi,tun_id,(int)(tuns[tun_id].size()+1)*X,P,&(dir[0]));
+	
 	lamport_clock();
-
 	int rand_num = rand() % 5 + 1;
 	sleep(rand_num); //simulating time taking to go through tunnel
-	lamport_clock();
+	//lamport_clock();
 
-	printf("%d, %d is now at the end of tunnel %d and waiting to exit\n",tsi,tid,tun_id); 
+	if(DEBUG)printf("%d, %d is now at the end of tunnel %d and waiting to exit\n",tsi,tid,tun_id); 
 	/*printf("\n%d, %d's lamport when waiting\n",tsi,tid);
 	for(int i = 0; i < tuns[tun_id].size(); i++){
 		printf("(%d)%d(%d) ",tid,tuns[tun_id][i].tid, tuns[tun_id][i].tsi);
@@ -330,7 +333,7 @@ void go_through(){
 	}
 
 	printf("\n---\n%d, %d left tunnel %d and entered %s\n---\n",tsi,tid,tun_id,&(dir[0]));
-	lamport_clock();
+	//lamport_clock();
 }
 
 
@@ -363,7 +366,7 @@ void *recv_thread(void *ptr){
 				req.dir = msg.dir;
 				
 				tuns_ordered_push(req, msg.tun_id);
-				update_dir(msg.tun_id); //TODO: HMMMMMMMMMMMMMM, was dir[msg.tun_id] = msg.dir
+				update_dir(msg.tun_id); 
 				
 			}
 			resp.resp = true; //true by default
@@ -430,7 +433,7 @@ void main_loop(){
 	srand (tid);
 	while(true){
 
-		printf("%d, %d entered another main loop iteration\n",tsi,tid);
+		if(DEBUG)printf("%d, %d entered another main loop iteration\n",tsi,tid);
 		
 		bool res = false;
 		while (res==false)
@@ -487,7 +490,7 @@ int main(int argc, char **argv)
 	printf("Checking!\n");
 	MPI_Comm_size( MPI_COMM_WORLD, &n ); //how many processes
 	MPI_Comm_rank( MPI_COMM_WORLD, &tid ); //my id
-	printf("My id is %d from %d\n",tid, n);
+	//printf("My id is %d from %d\n",tid, n);
 
 	for(int i = 0; i < T; i++){
 		tuns[i].reserve(n);
