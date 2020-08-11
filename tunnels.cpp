@@ -296,7 +296,7 @@ void go_through(){
 	printf("\n---\n%d, %d entered tunnel %d to %s.\n---\n",tsi, tid,tun_id,&(dir[0]));
 	//printf("%d, tunnel %d is now at %d/%d capacity and directed to %s\n",tsi,tun_id,(int)(tuns[tun_id].size()+1)*X,P,&(dir[0]));
 	
-	//lamport_clock();
+	lamport_clock();
 	int rand_num = rand() % 5 + 1;
 	sleep(rand_num); //simulating time taking to go through tunnel
 	//lamport_clock();
@@ -327,12 +327,15 @@ void go_through(){
 		//msg.tsi = tsi;
 		send(&msg,tuns[tun_id][i].tid,REL_TAG,true);
 	}*/
+
+	printf("\n---\n%d, %d left tunnel %d and entered %s\n---\n",tsi,tid,tun_id,&(dir[0]));
+	
 	for(int i = 0; i < n;i++){
 		//msg.tsi = tsi;
 		send(&msg,i,REL_TAG,true);
 	}
 
-	printf("\n---\n%d, %d left tunnel %d and entered %s\n---\n",tsi,tid,tun_id,&(dir[0]));
+	
 	//lamport_clock();
 }
 
