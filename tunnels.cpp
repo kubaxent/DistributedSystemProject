@@ -19,7 +19,7 @@
 //Task costants
 #define X 10 //Squad size
 #define P 30 //Tunnel size
-#define T 2 //Tunnels amount
+#define T 1 //Tunnels amount
 
 using namespace std;
 
@@ -296,7 +296,7 @@ void go_through(){
 	printf("\n---\n%d, %d entered tunnel %d to %s.\n---\n",tsi, tid,tun_id,&(dir[0]));
 	//printf("%d, tunnel %d is now at %d/%d capacity and directed to %s\n",tsi,tun_id,(int)(tuns[tun_id].size()+1)*X,P,&(dir[0]));
 	
-	lamport_clock();
+	//lamport_clock();
 	int rand_num = rand() % 5 + 1;
 	sleep(rand_num); //simulating time taking to go through tunnel
 	//lamport_clock();
@@ -317,7 +317,7 @@ void go_through(){
 		}
 		pthread_mutex_unlock(&cond_lock_top);
 	}
-	lamport_clock();
+	//lamport_clock();
 
 	tuns_remove(tid);
 	update_dir(tun_id);
