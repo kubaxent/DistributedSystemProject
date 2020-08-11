@@ -58,6 +58,8 @@ int n; //Rich people amount (if set to 0, communism.cpp takes over)
 bool all_resp_good = true; //If this remains true after all ack's we can get into the chosen tunnel queue
 bool awaiting_reps = false; //Flag indicating if we send back a req when someone requests a tunnel
 
+lamp_request my_req;
+
 //int tuns_tried = 0; //Every time we cannot secure a tunnel we increase this so that when it reaches the number of tunnels
 //we have to wait for a rel to check again
 
@@ -207,6 +209,8 @@ bool choose_tunnel(){
 	req.tid = tid;
 	req.tsi = tsi; //This is the time we're going with when sending requests
 	req.dir = cur_dir;
+
+	my_req = req;
 	tuns_ordered_push(req);
 	update_dir(tun_id);
 
@@ -293,7 +297,7 @@ void go_through(){
 	if(DEBUG)printf("%d, %d now has enough space to enter tunnel %d\n",tsi,tid,tun_id);
 
 	string dir = (cur_dir==1)?"paradise":"the real world";
-	printf("\n---\n%d, %d entered tunnel %d to %s.\n---\n",tsi, tid,tun_id,&(dir[0]));
+	printf("\n---\n%d, %d entered tunnel %d to %s WITH REQUEST TIME %d.\n---\n",tsi, tid,tun_id,&(dir[0]),my_req.tsi);
 	//printf("%d, tunnel %d is now at %d/%d capacity and directed to %s\n",tsi,tun_id,(int)(tuns[tun_id].size()+1)*X,P,&(dir[0]));
 	
 	lamport_clock();
@@ -309,6 +313,7 @@ void go_through(){
 	printf("\n");*/
 
 	//Waiting for being at the top to leave the tunnel
+	lamport_clock();
 	num = num_above();
 	if(num!=0){
 		pthread_mutex_lock(&cond_lock_top);
